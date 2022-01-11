@@ -177,6 +177,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         // if the URI is null the setting the title as null, because we don't know the title of that PDF file:
         if (uri == null) {
             //setting up the title:
+
             setTitle("");
             //returning then without doing the further steps:
             return;
