@@ -13,10 +13,12 @@ import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.database.Cursor;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.OpenableColumns;
 import android.util.Log;
 import android.view.View;
 import android.widget.Button;
@@ -36,12 +38,16 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     //Making a context reference variable for using the 'context' word very easily:
     private Context context;
 
+    // URI instance variable to track the file selected:
     private Uri uri;
 
+    //Variable for storing the PDF title or name:
     private String pdfFileName = "";
 
+    //page number of pdf file, initially it's 0, but it will increment after scrolling to next page:
     private int pageNumber = 0;
 
+    //Instance variable of PDF view. It's from the library:
     private PDFView pdfView;
 
     @Override
@@ -60,8 +66,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     private void initUI() {
         //instantiating the load btn:
         loadBtn = findViewById(R.id.loadBtn);
+        //instantiate the OnClick Listener for creating action event from outside of the onCreate():
         loadBtn.setOnClickListener(this);
 
+        //Instantiate the PDF view:
         pdfView = findViewById(R.id.pdfViewer);
 
     }
@@ -81,8 +89,12 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
     //Opening the pdf file after clicking on the Load Btn:
     private void openingPDFFile() {
+        // storing the selected pdf file int URI:
         uri = getIntent().getData();
+        // checking. whether the URI is null or not:
+        //If it's null the ask for picking a file:
         if (uri == null) {
+            // Asking for the picking or selecting a file from storage:
             pickFile();
         }
     }
@@ -90,6 +102,9 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     //selecting the file or picking up the file from storage:
     private void pickFile() {
         try {
+            //check with the ActivityResult to know we are getting the correct URI for showing as PDF:
+            // also setting our file type as only PDF:
+            // NOTE: we can also initiate more file types like docs,txt, etc.
             documentPickerLauncher.launch(new String[]{"application/pdf"});
         } catch (ActivityNotFoundException e) {
             //alert user that file manager not working
@@ -131,6 +146,8 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
     private final ActivityResultLauncher<String[]> documentPickerLauncher = registerForActivityResult(
             new ActivityResultContracts.OpenDocument(),
+            //this::openSelectedDocument
+            // referring method reference using double colon by replacing the lambda:(Basically it's a callback)
             this::openSelectedDocument
     );
 
@@ -154,32 +171,64 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         }
     }
 
+    //Trying to display the URI from selected PDF file on the PDF view:
     void displayFromUri(Uri uri) {
+        //Checking the URI is null or not:
+        // if the URI is null the setting the title as null, because we don't know the title of that PDF file:
         if (uri == null) {
+            //setting up the title:
             setTitle("");
+            //returning then without doing the further steps:
             return;
         }
-
+        //getting the file name of the selected PDF file:
+        pdfFileName = getFileName(uri);
         //pdfFileName = getFileName(uri);
         setTitle(pdfFileName);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            setTaskDescription(new ActivityManager.TaskDescription(pdfFileName));
-        }
+        //This is only validate for API level > 21:
+        setTaskDescription(new ActivityManager.TaskDescription(pdfFileName));
 
+
+        //If found anything related to the downloadable on the PDF file, It will do that:
         String scheme = uri.getScheme();
         if (scheme != null && scheme.contains("http")) {
             //downloadOrShowDownloadedFile(uri);
         } else {
+            //setting the URI on the View:
             pdfView.fromUri(uri);
+            //Configuring the PDF view as per we needed:
             configurePdfViewAndLoad(pdfView.fromUri(uri));
         }
     }
 
+    //Extracting the file name from the selected PDF file:
+    public String getFileName(Uri uri) {
+        String result = null;
+        if (uri.getScheme() != null && uri.getScheme().equals("content")) {
+            try (Cursor cursor = getContentResolver().query(uri, null, null, null, null)) {
+                if (cursor != null && cursor.moveToFirst()) {
+                    int indexDisplayName = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                    if (indexDisplayName != -1) {
+                        result = cursor.getString(indexDisplayName);
+                    }
+                }
+            } catch (Exception e) {
+                //Log.w(TAG, "Couldn't retrieve file name", e);
+            }
+        }
+        if (result == null) {
+            result = uri.getLastPathSegment();
+        }
+        return result;
+    }
+
+    // Setting the Page number and the title at once:
     private void setCurrentPage(int page, int pageCount) {
         pageNumber = page;
         setTitle(String.format("%s %s / %s", pdfFileName + " ", page + 1, pageCount));
     }
 
+    // Configuring the PDF view to make it more flexible and easier to use:
     void configurePdfViewAndLoad(PDFView.Configurator viewConfigurator) {
 //        if (!prefManager.getBoolean("pdftheme_pref", false)) {
 //            viewBinding.pdfView.setBackgroundColor(Color.LTGRAY);
@@ -187,11 +236,17 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 //            viewBinding.pdfView.setBackgroundColor(0xFF212121);
 //        }
 //        viewBinding.pdfView.useBestQuality(prefManager.getBoolean("quality_pref", false));
-//        viewBinding.pdfView.setMinZoom(0.5f);
-//        viewBinding.pdfView.setMidZoom(2.0f);
-//        viewBinding.pdfView.setMaxZoom(5.0f);
+
+        //setting the minimum limitation of being zoomed
+        pdfView.setMinZoom(0.5f);
+        //mid zoom
+        pdfView.setMidZoom(2.0f);
+        //setting the maximum zoom limitation:
+        pdfView.setMaxZoom(5.0f);
         viewConfigurator
+                //setting the page number:
                 .defaultPage(pageNumber)
+                //call back page change listener:
                 .onPageChange(this::setCurrentPage)
                 .enableAnnotationRendering(true)
                 //.enableAntialiasing(prefManager.getBoolean("alias_pref", true))
@@ -204,10 +259,11 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 .pageFitPolicy(FitPolicy.WIDTH)
                 //.password(pdfPassword)
                 //.swipeHorizontal(prefManager.getBoolean("scroll_pref", false))
-               // .autoSpacing(prefManager.getBoolean("scroll_pref", false))
+                // .autoSpacing(prefManager.getBoolean("scroll_pref", false))
                 //.pageSnap(prefManager.getBoolean("snap_pref", false))
                 //.pageFling(prefManager.getBoolean("fling_pref", false))
                 //.nightMode(prefManager.getBoolean("pdftheme_pref", false))
+                //loaded the PDF file:
                 .load();
     }
 }
