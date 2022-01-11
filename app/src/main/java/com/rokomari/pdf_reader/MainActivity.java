@@ -238,11 +238,11 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 //        viewBinding.pdfView.useBestQuality(prefManager.getBoolean("quality_pref", false));
 
         //setting the minimum limitation of being zoomed
-        pdfView.setMinZoom(0.5f);
+        pdfView.setMinZoom(1.0f);
         //mid zoom
         pdfView.setMidZoom(2.0f);
         //setting the maximum zoom limitation:
-        pdfView.setMaxZoom(5.0f);
+        pdfView.setMaxZoom(3.0f);
         viewConfigurator
                 //setting the page number:
                 .defaultPage(pageNumber)
