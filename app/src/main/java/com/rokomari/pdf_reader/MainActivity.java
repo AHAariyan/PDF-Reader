@@ -42,7 +42,7 @@ import android.widget.Toast;
 import com.github.barteksc.pdfviewer.PDFView;
 import com.github.barteksc.pdfviewer.scroll.DefaultScrollHandle;
 import com.github.barteksc.pdfviewer.util.FitPolicy;
-import com.jaredrummler.cyanea.Cyanea;
+
 import com.rokomari.pdf_reader.Utils.Utils;
 import com.shockwave.pdfium.PdfDocument;
 import com.shockwave.pdfium.PdfPasswordException;
@@ -70,15 +70,19 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     //Instance variable of PDF view. It's from the library:
     private PDFView pdfView;
 
+    //For holding data on device internal storage as SharedPreference data:
     private SharedPreferences prefManager;
 
+    //instance variable for string the user inputted password:
     private String pdfPassword;
 
-    private Intent requestFileIntent;
-
+    //Instance variable for title or the PDF file, current page number and total page number:
     private TextView pageNo, title;
 
+    //Dialog instance variable for inflating the Custom layout:
     View dialogView;
+
+    // password edit text field for entering the password for protected PDF file:
     private EditText passwordField;
 
 
@@ -87,30 +91,31 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        Cyanea.init(getApplication(), getResources());
-
         //Instantiate the context reference variable with the MainActivity.this:
         context = MainActivity.this;
 
-        requestFileIntent = new Intent(Intent.ACTION_PICK);
-        requestFileIntent.setType("application/pdf");
-
-        StrictMode.VmPolicy.Builder builder = new StrictMode.VmPolicy.Builder();
-        StrictMode.setVmPolicy(builder.build());
-
+        // Instantiating the SharedPreference for saving small values for further use easily
         prefManager = PreferenceManager.getDefaultSharedPreferences(this);
         onFirstUpdate();
 
         //Instantiate the UI variable:
         initUI();
 
+        // Checking if the device is rotated or not:
         if (savedInstanceState != null) {
+            //if device rotated then it will save the current data will be retrieve from the save instance state:
             restoreInstanceState(savedInstanceState);
         } else {
+            //getting the URI automatically when user open the app
             uri = getIntent().getData();
-            if (uri == null)
+            //checking the uri is null or not
+            if (uri == null) {
+                //if the URi is null, then it will attempt to pick file again from the storage:
                 pickFile();
+            }
+
         }
+        //Finally, Trying to display the selected PDF file
         displayFromUri(uri);
     }
 
@@ -139,21 +144,34 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         }
     }
 
+    //It will ask for the password when the app will find and password protected PDF file:
     void askForPdfPassword() {
-        //PasswordDialogBinding dialogBinding = PasswordDialogBinding.inflate(getLayoutInflater());
+        //Inflating the layout view for showing on the dialog as Alert Dialog:
         dialogView = LayoutInflater.from(MainActivity.this).inflate(R.layout.password_dialog, null);
+        //Instantiating the passwordField where user will give input the password:
         passwordField = dialogView.findViewById(R.id.passwordInput);
         AlertDialog alert = new AlertDialog.Builder(this)
+                //Setting the main title when dialog will be appear in front of the user for password:
                 .setTitle("Password required")
+                //Secondary title for giving more information to the users:
                 .setMessage("This document is password protected. Please enter a password.")
+                //Finally, Set the custom view to the dialog
                 .setView(dialogView)
+                //setting the button action event when user will try to proceed further:
                 .setPositiveButton("ok", (dialog, which) -> {
+                    //taking the password from the user
                     pdfPassword = passwordField.getText().toString();
+                    //trying to open the pdf file finally if password is right:
                     displayFromUri(uri);
                 })
+                //Setting an icon to make it better view to the user:
                 .setIcon(R.drawable.lock_icon)
+                //Creating the dialog after doing necessary things
                 .create();
+        // User will not be able to cancel the dialog or if user click on outside of the dialog it will not disappear
+        //only it will be disappear when it will get the right password:
         alert.setCanceledOnTouchOutside(false);
+        //Finally show the dialog to the user:
         alert.show();
     }
 
@@ -253,16 +271,18 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     }
 
     //Opening the pdf file after clicking on the Load Btn:
-    private void openingPDFFile() {
-        // storing the selected pdf file int URI:
-        uri = getIntent().getData();
-        // checking. whether the URI is null or not:
-        //If it's null the ask for picking a file:
-        if (uri == null) {
-            // Asking for the picking or selecting a file from storage:
-            pickFile();
-        }
-    }
+//    private void openingPDFFile() {
+//        Toast.makeText(MainActivity.this, "1", Toast.LENGTH_SHORT).show();
+//        // storing the selected pdf file int URI:
+//        uri = getIntent().getData();
+//        // checking. whether the URI is null or not:
+//        //If it's null the ask for picking a file:
+//        if (uri == null) {
+//            Toast.makeText(MainActivity.this, "2 ", Toast.LENGTH_SHORT).show();
+//            // Asking for the picking or selecting a file from storage:
+//            pickFile();
+//        }
+//    }
 
     //selecting the file or picking up the file from storage:
     private void pickFile() {
@@ -282,7 +302,8 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         //if the permission is granted already the proceed for the next work:
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
             // open the file from storage to the app:
-            openingPDFFile();
+            //openingPDFFile();
+            pickFile();
         } else {
             // You can directly ask for the permission.
             // The registered ActivityResultCallback gets the result of this request.
@@ -298,7 +319,8 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         if (isGranted) {
             // Permission is granted. Continue the action or workflow in your
             // app.
-            openingPDFFile();
+            //openingPDFFile();
+            pickFile();
         } else {
             // Explain to the user that the feature is unavailable because the
             // features requires a permission that the user has denied. At the
