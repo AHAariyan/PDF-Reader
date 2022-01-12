@@ -27,6 +27,7 @@ import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.StrictMode;
 import android.preference.PreferenceManager;
 import android.provider.OpenableColumns;
@@ -36,6 +37,7 @@ import android.view.View;
 import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -47,7 +49,9 @@ import com.rokomari.pdf_reader.Utils.Utils;
 import com.shockwave.pdfium.PdfDocument;
 import com.shockwave.pdfium.PdfPasswordException;
 
+import java.io.File;
 import java.io.FileNotFoundException;
+import java.io.IOException;
 import java.security.Permission;
 
 public class MainActivity extends AppCompatActivity implements View.OnClickListener {
@@ -84,6 +88,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
     // password edit text field for entering the password for protected PDF file:
     private EditText passwordField;
+
+    private byte[] downloadedPdfFileContent;
+
+    private ProgressBar progressBar;
 
 
     @Override
@@ -129,16 +137,23 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         startActivity(sharingIntent);
     }
 
+    //handling the error it will throw an exception when it will unable to open PDF file
     private void handleFileOpeningError(Throwable exception) {
+        //If it's an password exception, means if it requires a password for opening the PDF:
         if (exception instanceof PdfPasswordException) {
+            // Checking whether the password is null or not:
             if (pdfPassword != null) {
+                //If password doesn't matched
                 Toast.makeText(this, "Wrong password", Toast.LENGTH_SHORT).show();
                 pdfPassword = null;  // prevent the toast from being shown again if the user rotates the screen
             }
+            // Asking for the password entry from the user side:
             askForPdfPassword();
         } else if (couldNotOpenFileDueToMissingPermission(exception)) {
+            //If app doesn't provide yet a permission for reading file:
             readFileErrorPermissionLauncher.launch(Manifest.permission.READ_EXTERNAL_STORAGE);
         } else {
+            //Unknown error, not handled:
             Toast.makeText(this, "An error occurred while opening the file!", Toast.LENGTH_LONG).show();
             //Log.e(TAG, "Error when opening file", exception);
         }
@@ -210,6 +225,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
     @Override
     protected void onSaveInstanceState(@NonNull Bundle outState) {
+        //Saving the URI, page number and password for smoothly transition of the rotation:
         outState.putParcelable("uri", uri);
         outState.putInt("pageNumber", pageNumber);
         outState.putString("pdfPassword", pdfPassword);
@@ -217,6 +233,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     }
 
     private void restoreInstanceState(Bundle savedState) {
+        //Restoring the state value that was saved in time of rotating the device:
         uri = savedState.getParcelable("uri");
         pageNumber = savedState.getInt("pageNumber");
         pdfPassword = savedState.getString("pdfPassword");
@@ -251,9 +268,12 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         //Instantiate the PDF view:
         pdfView = findViewById(R.id.pdfViewer);
 
-        //
+        //Instantiating the page number for showing the total page and current page number:
         pageNo = findViewById(R.id.pageNumber);
+        //Instantiating the title to show the PDF file title name:
         title = findViewById(R.id.title);
+
+        progressBar = findViewById(R.id.progressBar);
 
     }
 
@@ -369,7 +389,8 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         // if the URI is null the setting the title as null, because we don't know the title of that PDF file:
         if (uri == null) {
             //setting up the title:
-            setTitle("");
+            //setTitle("No file selected!");
+            title.setText(String.format("%s", "No file selected!"));
             //returning then without doing the further steps:
             return;
         }
@@ -384,7 +405,7 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         //If found anything related to the downloadable on the PDF file, It will do that:
         String scheme = uri.getScheme();
         if (scheme != null && scheme.contains("http")) {
-            //downloadOrShowDownloadedFile(uri);
+            downloadOrShowDownloadedFile(uri);
         } else {
             //setting the URI on the View:
             pdfView.fromUri(uri);
@@ -393,31 +414,101 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         }
     }
 
+        private void downloadOrShowDownloadedFile(Uri uri) {
+        if (downloadedPdfFileContent == null) {
+            downloadedPdfFileContent = (byte[]) getLastCustomNonConfigurationInstance();
+        }
+        if (downloadedPdfFileContent != null) {
+            configurePdfViewAndLoad(pdfView.fromBytes(downloadedPdfFileContent));
+        } else {
+            // we will get the pdf asynchronously with the DownloadPDFFile object
+            progressBar.setVisibility(View.VISIBLE);
+            DownloadPDFFile downloadPDFFile = new DownloadPDFFile(this);
+            downloadPDFFile.execute(uri.toString());
+        }
+    }
+
+    public void hideProgressBar() {
+        progressBar.setVisibility(View.GONE);
+    }
+
+    void saveToFileAndDisplay(byte[] pdfFileContent) {
+        downloadedPdfFileContent = pdfFileContent;
+        saveToDownloadFolderIfAllowed(pdfFileContent);
+        configurePdfViewAndLoad(pdfView.fromBytes(pdfFileContent));
+    }
+    private void saveToDownloadFolderIfAllowed(byte[] fileContent) {
+        if (Utils.canWriteToDownloadFolder(this)) {
+            trySaveToDownloadFolder(fileContent, false);
+        } else {
+            saveToDownloadPermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE);
+        }
+    }
+
+    private final ActivityResultLauncher<String> saveToDownloadPermissionLauncher = registerForActivityResult(
+            new ActivityResultContracts.RequestPermission(),
+            this::saveDownloadedFileAfterPermissionRequest
+    );
+    private void saveDownloadedFileAfterPermissionRequest(boolean isPermissionGranted) {
+        if (isPermissionGranted) {
+            trySaveToDownloadFolder(downloadedPdfFileContent, true);
+        } else {
+            //Toast.makeText(this, R.string.save_to_download_failed, Toast.LENGTH_SHORT).show();
+        }
+    }
+
+
+    private void trySaveToDownloadFolder(byte[] fileContent, boolean showSuccessMessage) {
+        try {
+            File downloadDirectory = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+            Utils.writeBytesToFile(downloadDirectory, pdfFileName, fileContent);
+            if (showSuccessMessage) {
+                //Toast.makeText(this, R.string.saved_to_download, Toast.LENGTH_SHORT).show();
+            }
+        } catch (IOException e) {
+            Log.e(TAG, "Error while saving file to download folder", e);
+            //Toast.makeText(this, R.string.save_to_download_failed, Toast.LENGTH_SHORT).show();
+        }
+    }
+
     //Extracting the file name from the selected PDF file:
     public String getFileName(Uri uri) {
+        //result instance variable to store the File name:
         String result = null;
+        //If it's not a web URL or something like this
         if (uri.getScheme() != null && uri.getScheme().equals("content")) {
+            // traversing through Content Resolver:
             try (Cursor cursor = getContentResolver().query(uri, null, null, null, null)) {
+                //Check whether it's find the file by the URI then move to the next:
                 if (cursor != null && cursor.moveToFirst()) {
+                    //getting the index of that file:
                     int indexDisplayName = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                    //Check whether the index is valid or not, if valid then proceed:
                     if (indexDisplayName != -1) {
+                        //storing the file name finally!:
                         result = cursor.getString(indexDisplayName);
                     }
                 }
             } catch (Exception e) {
+                // it will through an exception if it's find any error while searching the file:
                 //Log.w(TAG, "Couldn't retrieve file name", e);
             }
         }
         if (result == null) {
+            // if it doesn't find andy valid index and the result is 0 then it will store the last path of the URI:
             result = uri.getLastPathSegment();
         }
+        //returning the file name:
         return result;
     }
 
     // Setting the Page number and the title at once:
     private void setCurrentPage(int page, int pageCount) {
+        //Current page number:
         pageNumber = page;
+        //setting the title of the PDF file:
         title.setText(String.format("%s", pdfFileName));
+        //setting the current and total page number by a slash
         pageNo.setText(String.format("Page %s / %s", page + 1, pageCount));
         //setTitle(String.format("%s %s / %s", pdfFileName + " ", page + 1, pageCount));
     }
@@ -447,10 +538,15 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 //.onTap(this::toggleBottomNavigationVisibility)
                 //.onPageScroll(this::toggleBottomNavigationAccordingToPosition)
                 .scrollHandle(new DefaultScrollHandle(this))
+                //Spacing after each page
                 .spacing(10) // in dp
+                //Basically it happens when PDF file is password protected
                 .onError(this::handleFileOpeningError)
+                // if it fails to load or view the page
                 .onPageError((page, err) -> Log.e("MAIN_ACTIVITY", "Cannot load page " + page, err))
+                //It will make the page width fill
                 .pageFitPolicy(FitPolicy.WIDTH)
+                //Password needed for password protected PDF file
                 .password(pdfPassword)
                 .swipeHorizontal(prefManager.getBoolean("scroll_pref", false))
                 .autoSpacing(prefManager.getBoolean("scroll_pref", false))
@@ -459,6 +555,8 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 .nightMode(prefManager.getBoolean("pdftheme_pref", false))
                 //loaded the PDF file:
                 .load();
+
+        pdfView.useBestQuality(true);
     }
 
     public static class PdfMetaDialog extends DialogFragment {

@@ -86,7 +86,7 @@ public class Utils {
         return BuildConfig.VERSION_NAME;
     }
 
-    static boolean canWriteToDownloadFolder(Context context) {
+    public static boolean canWriteToDownloadFolder(Context context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
             return true;
 
@@ -94,7 +94,7 @@ public class Utils {
                 == PackageManager.PERMISSION_GRANTED;
     }
 
-    static byte[] readBytesToEnd(InputStream inputStream) throws IOException {
+    public static byte[] readBytesToEnd(InputStream inputStream) throws IOException {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         byte[] buffer = new byte[8 * 1024];
         int bytesRead;
@@ -104,7 +104,7 @@ public class Utils {
         return output.toByteArray();
     }
 
-    static void writeBytesToFile(File directory, String fileName, byte[] fileContent) throws IOException {
+    public static void writeBytesToFile(File directory, String fileName, byte[] fileContent) throws IOException {
         File file = new File(directory, fileName);
         try (FileOutputStream stream = new FileOutputStream(file)) {
             stream.write(fileContent);
