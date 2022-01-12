@@ -1,33 +1,53 @@
 package com.rokomari.pdf_reader;
 
+import static android.content.ContentValues.TAG;
+import static android.content.pm.PackageManager.PERMISSION_GRANTED;
+
 import androidx.activity.result.ActivityResultCallback;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.PackageManagerCompat;
+import androidx.fragment.app.DialogFragment;
 
 import android.Manifest;
 import android.app.ActivityManager;
+import android.app.Dialog;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.StrictMode;
+import android.preference.PreferenceManager;
 import android.provider.OpenableColumns;
 import android.util.Log;
+import android.view.LayoutInflater;
 import android.view.View;
+import android.view.WindowManager;
 import android.widget.Button;
+import android.widget.EditText;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import com.github.barteksc.pdfviewer.PDFView;
 import com.github.barteksc.pdfviewer.scroll.DefaultScrollHandle;
 import com.github.barteksc.pdfviewer.util.FitPolicy;
+import com.jaredrummler.cyanea.Cyanea;
+import com.rokomari.pdf_reader.Utils.Utils;
+import com.shockwave.pdfium.PdfDocument;
+import com.shockwave.pdfium.PdfPasswordException;
 
+import java.io.FileNotFoundException;
 import java.security.Permission;
 
 public class MainActivity extends AppCompatActivity implements View.OnClickListener {
@@ -50,16 +70,157 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     //Instance variable of PDF view. It's from the library:
     private PDFView pdfView;
 
+    private SharedPreferences prefManager;
+
+    private String pdfPassword;
+
+    private Intent requestFileIntent;
+
+    private TextView pageNo, title;
+
+    View dialogView;
+    private EditText passwordField;
+
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        Cyanea.init(getApplication(), getResources());
+
         //Instantiate the context reference variable with the MainActivity.this:
         context = MainActivity.this;
 
+        requestFileIntent = new Intent(Intent.ACTION_PICK);
+        requestFileIntent.setType("application/pdf");
+
+        StrictMode.VmPolicy.Builder builder = new StrictMode.VmPolicy.Builder();
+        StrictMode.setVmPolicy(builder.build());
+
+        prefManager = PreferenceManager.getDefaultSharedPreferences(this);
+        onFirstUpdate();
+
         //Instantiate the UI variable:
         initUI();
+
+        if (savedInstanceState != null) {
+            restoreInstanceState(savedInstanceState);
+        } else {
+            uri = getIntent().getData();
+            if (uri == null)
+                pickFile();
+        }
+        displayFromUri(uri);
+    }
+
+    void shareFile() {
+        Intent sharingIntent;
+        if (uri.getScheme() != null && uri.getScheme().startsWith("http")) {
+            sharingIntent = Utils.plainTextShareIntent("Share File", uri.toString());
+        } else {
+            sharingIntent = Utils.fileShareIntent("Share File", pdfFileName, uri);
+        }
+        startActivity(sharingIntent);
+    }
+
+    private void handleFileOpeningError(Throwable exception) {
+        if (exception instanceof PdfPasswordException) {
+            if (pdfPassword != null) {
+                Toast.makeText(this, "Wrong password", Toast.LENGTH_SHORT).show();
+                pdfPassword = null;  // prevent the toast from being shown again if the user rotates the screen
+            }
+            askForPdfPassword();
+        } else if (couldNotOpenFileDueToMissingPermission(exception)) {
+            readFileErrorPermissionLauncher.launch(Manifest.permission.READ_EXTERNAL_STORAGE);
+        } else {
+            Toast.makeText(this, "An error occurred while opening the file!", Toast.LENGTH_LONG).show();
+            //Log.e(TAG, "Error when opening file", exception);
+        }
+    }
+
+    void askForPdfPassword() {
+        //PasswordDialogBinding dialogBinding = PasswordDialogBinding.inflate(getLayoutInflater());
+        dialogView = LayoutInflater.from(MainActivity.this).inflate(R.layout.password_dialog, null);
+        passwordField = dialogView.findViewById(R.id.passwordInput);
+        AlertDialog alert = new AlertDialog.Builder(this)
+                .setTitle("Password required")
+                .setMessage("This document is password protected. Please enter a password.")
+                .setView(dialogView)
+                .setPositiveButton("ok", (dialog, which) -> {
+                    pdfPassword = passwordField.getText().toString();
+                    displayFromUri(uri);
+                })
+                .setIcon(R.drawable.lock_icon)
+                .create();
+        alert.setCanceledOnTouchOutside(false);
+        alert.show();
+    }
+
+    void showPdfMetaDialog() {
+        PdfDocument.Meta meta = pdfView.getDocumentMeta();
+        if (meta != null) {
+            Bundle dialogArgs = new Bundle();
+            dialogArgs.putString(PdfMetaDialog.TITLE_ARGUMENT, meta.getTitle());
+            dialogArgs.putString(PdfMetaDialog.AUTHOR_ARGUMENT, meta.getAuthor());
+            dialogArgs.putString(PdfMetaDialog.CREATION_DATE_ARGUMENT, meta.getCreationDate());
+            DialogFragment dialog = new PdfMetaDialog();
+            dialog.setArguments(dialogArgs);
+            dialog.show(getSupportFragmentManager(), "meta_dialog");
+        }
+    }
+
+    private boolean couldNotOpenFileDueToMissingPermission(Throwable e) {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) == PERMISSION_GRANTED)
+            return false;
+
+        String exceptionMessage = e.getMessage();
+        return e instanceof FileNotFoundException &&
+                exceptionMessage != null && exceptionMessage.contains("Permission denied");
+    }
+
+    private void restartAppIfGranted(boolean isPermissionGranted) {
+        if (isPermissionGranted) {
+            // This is a quick and dirty way to make the system restart the current activity *and the current app process*.
+            // This is needed because on Android 6 storage permission grants do not take effect until
+            // the app process is restarted.
+            System.exit(0);
+        } else {
+            Toast.makeText(this, "File Opening Error!", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    @Override
+    protected void onSaveInstanceState(@NonNull Bundle outState) {
+        outState.putParcelable("uri", uri);
+        outState.putInt("pageNumber", pageNumber);
+        outState.putString("pdfPassword", pdfPassword);
+        super.onSaveInstanceState(outState);
+    }
+
+    private void restoreInstanceState(Bundle savedState) {
+        uri = savedState.getParcelable("uri");
+        pageNumber = savedState.getInt("pageNumber");
+        pdfPassword = savedState.getString("pdfPassword");
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        if (prefManager.getBoolean("screen_on_pref", false)) {
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        }
+    }
+
+    private void onFirstUpdate() {
+        boolean isFirstRun = prefManager.getBoolean(Utils.getAppVersion(), true);
+        if (isFirstRun) {
+            //Utils.showLog(this);
+            SharedPreferences.Editor editor = prefManager.edit();
+            editor.putBoolean(Utils.getAppVersion(), false);
+            editor.apply();
+        }
     }
 
     //Instantiate the UI variable:
@@ -71,6 +232,10 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
         //Instantiate the PDF view:
         pdfView = findViewById(R.id.pdfViewer);
+
+        //
+        pageNo = findViewById(R.id.pageNumber);
+        title = findViewById(R.id.title);
 
     }
 
@@ -151,6 +316,11 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
             this::openSelectedDocument
     );
 
+    private final ActivityResultLauncher<String> readFileErrorPermissionLauncher = registerForActivityResult(
+            new ActivityResultContracts.RequestPermission(),
+            this::restartAppIfGranted
+    );
+
     //when user will select the document:
     private void openSelectedDocument(Uri selectedDocumentUri) {
         //checking the document is elected or not:
@@ -177,7 +347,6 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         // if the URI is null the setting the title as null, because we don't know the title of that PDF file:
         if (uri == null) {
             //setting up the title:
-
             setTitle("");
             //returning then without doing the further steps:
             return;
@@ -226,7 +395,9 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
     // Setting the Page number and the title at once:
     private void setCurrentPage(int page, int pageCount) {
         pageNumber = page;
-        setTitle(String.format("%s %s / %s", pdfFileName + " ", page + 1, pageCount));
+        title.setText(String.format("%s", pdfFileName));
+        pageNo.setText(String.format("Page %s / %s", page + 1, pageCount));
+        //setTitle(String.format("%s %s / %s", pdfFileName + " ", page + 1, pageCount));
     }
 
     // Configuring the PDF view to make it more flexible and easier to use:
@@ -250,21 +421,42 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 //call back page change listener:
                 .onPageChange(this::setCurrentPage)
                 .enableAnnotationRendering(true)
-                //.enableAntialiasing(prefManager.getBoolean("alias_pref", true))
+                .enableAntialiasing(prefManager.getBoolean("alias_pref", true))
                 //.onTap(this::toggleBottomNavigationVisibility)
                 //.onPageScroll(this::toggleBottomNavigationAccordingToPosition)
                 .scrollHandle(new DefaultScrollHandle(this))
                 .spacing(10) // in dp
-                //.onError(this::handleFileOpeningError)
-                //.onPageError((page, err) -> Log.e(TAG, "Cannot load page " + page, err))
+                .onError(this::handleFileOpeningError)
+                .onPageError((page, err) -> Log.e("MAIN_ACTIVITY", "Cannot load page " + page, err))
                 .pageFitPolicy(FitPolicy.WIDTH)
-                //.password(pdfPassword)
-                //.swipeHorizontal(prefManager.getBoolean("scroll_pref", false))
-                // .autoSpacing(prefManager.getBoolean("scroll_pref", false))
+                .password(pdfPassword)
+                .swipeHorizontal(prefManager.getBoolean("scroll_pref", false))
+                .autoSpacing(prefManager.getBoolean("scroll_pref", false))
                 //.pageSnap(prefManager.getBoolean("snap_pref", false))
-                //.pageFling(prefManager.getBoolean("fling_pref", false))
-                //.nightMode(prefManager.getBoolean("pdftheme_pref", false))
+                .pageFling(prefManager.getBoolean("fling_pref", false))
+                .nightMode(prefManager.getBoolean("pdftheme_pref", false))
                 //loaded the PDF file:
                 .load();
+    }
+
+    public static class PdfMetaDialog extends DialogFragment {
+
+        public static final String TITLE_ARGUMENT = "title";
+        public static final String AUTHOR_ARGUMENT = "author";
+        public static final String CREATION_DATE_ARGUMENT = "creation_date";
+
+        @NonNull
+        @Override
+        public Dialog onCreateDialog(@Nullable Bundle savedInstanceState) {
+            AlertDialog.Builder builder = new AlertDialog.Builder(requireContext());
+            return builder.setTitle("")
+                    //.setMessage(getString(R.string.pdf_title, getArguments().getString(TITLE_ARGUMENT)) + "\n" +
+                    //getString(R.string.pdf_author, getArguments().getString(AUTHOR_ARGUMENT)) + "\n" +
+                    //getString(R.string.pdf_creation_date, getArguments().getString(CREATION_DATE_ARGUMENT)))
+                    .setPositiveButton("ok", (dialog, which) -> {
+                    })
+                    .setIcon(R.drawable.info_icon)
+                    .create();
+        }
     }
 }

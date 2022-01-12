@@ -6,6 +6,60 @@
     android:layout_height="match_parent"
     tools:context=".MainActivity">
 
+    <LinearLayout
+        android:id="@+id/toolbarLayout"
+        android:layout_width="match_parent"
+        android:layout_height="50dp"
+        android:orientation="horizontal"
+        android:background="@color/purple_700"
+        >
+
+        <HorizontalScrollView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="3"
+            android:layout_gravity="center_vertical"
+            android:layout_marginStart="15dp"
+            >
+
+            <TextView
+                android:id="@+id/title"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_vertical"
+                android:textSize="18sp"
+                android:text=""
+                android:textColor="@android:color/white"
+                android:textStyle="normal"
+                />
+        </HorizontalScrollView>
+
+
+        <TextView
+            android:id="@+id/pageNumber"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="2"
+            android:layout_gravity="center_vertical"
+            android:gravity="end"
+            android:layout_marginEnd="15dp"
+            android:layout_marginStart="15dp"
+            android:textSize="16sp"
+            android:text=""
+            android:textColor="@android:color/white"
+            android:textStyle="normal"
+            />
+
+    </LinearLayout>
+
+    <com.github.barteksc.pdfviewer.PDFView
+        android:layout_below="@id/toolbarLayout"
+        android:id="@+id/pdfViewer"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_above="@id/loadBtn"
+        />
+
     <Button
         android:id="@+id/loadBtn"
         android:layout_width="wrap_content"
@@ -13,13 +67,6 @@
         android:text="Load PDF"
         android:layout_alignParentBottom="true"
         android:layout_centerHorizontal="true"
-        />
-
-    <com.github.barteksc.pdfviewer.PDFView
-        android:id="@+id/pdfViewer"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:layout_above="@id/loadBtn"
         />
 
     <ProgressBar
